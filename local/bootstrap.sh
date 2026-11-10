@@ -5,7 +5,9 @@
 # Potem uruchom Hyprland i odpal local/finish.sh.
 #
 # Odtwarza: snapper + snap-pac, limine-snapper-sync, btrfs-overlayfs,
-# /etc/default/limine, przypięty mirrorlist (Arch Linux Archive), okno sudo.
+# /etc/default/limine (z wykrywaniem Windowsa/Ubuntu), multilib, sterownik
+# NVIDIA z wczesnym KMS, /mnt/win i /mnt/ubuntu, przypięty mirrorlist
+# (Arch Linux Archive), okno sudo.
 # Skrypt jest idempotentny: kroki, które już są zrobione, pomija.
 # PIN_DATE=RRRR/MM/DD ./bootstrap.sh  -> inna data niż "wczoraj".
 set -euo pipefail
@@ -14,6 +16,14 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PIN_DATE=${PIN_DATE:-$(date -d yesterday +%Y/%m/%d)}
 ARCHIVE=https://archive.archlinux.org/repos
 USER_NAME=$(id -un)
+# Partycje innych systemów do podmontowania (pusta wartość = pomiń).
+WIN_UUID=${WIN_UUID-7CC22557C2251744}
+UBUNTU_UUID=${UBUNTU_UUID-94acddf2-85da-4eba-9441-bbfd66d23463}
+# Karta NVIDIA (vendor 0x10de, klasa 0x03xxxx = kontroler grafiki)?
+NVIDIA=no
+for d in /sys/bus/pci/devices/*; do
+    [[ $(<"$d/vendor") == 0x10de && $(<"$d/class") == 0x03* ]] && NVIDIA=yes && break
+done
 
 b=$'\e[1m'; y=$'\e[33m'; r=$'\e[31m'; o=$'\e[0m'
 step() { printf '\n%s==> %s%s\n' "$b" "$*" "$o"; }
@@ -25,6 +35,13 @@ die()  { printf '%sBŁĄD:%s %s\n' "$r" "$o" "$*" >&2; exit 1; }
 command -v limine >/dev/null || die "brak limine. Ten skrypt zakłada bootloader Limine z archinstall"
 mountpoint -q /boot || die "/boot nie jest osobnym montowaniem (ESP). Oczekiwano ESP=/boot"
 sudo -v
+
+step "multilib"
+if ! grep -qE '^\[multilib\]' /etc/pacman.conf; then
+    sudo cp /etc/pacman.conf /etc/pacman.conf.bak
+    sudo sed -i -E '/^#\[multilib\]$/,/^#Include/ s/^#//' /etc/pacman.conf
+fi
+grep -qE '^\[multilib\]' /etc/pacman.conf || die "nie udało się włączyć multilib w /etc/pacman.conf"
 
 step "Przypięcie repozytoriów do $PIN_DATE"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$ARCHIVE/$PIN_DATE/core/os/x86_64/core.db" || true)
@@ -41,6 +58,10 @@ step "Pakiety bazowe"
 sudo pacman -S --needed --noconfirm git base-devel btrfs-progs snapper snap-pac \
     efibootmgr zram-generator inotify-tools \
     speedtest-cli tmux openssh nodejs npm ttf-dejavu
+if [[ $NVIDIA == yes ]]; then
+    step "Sterownik NVIDIA (open kernel modules)"
+    sudo pacman -S --needed --noconfirm nvidia-open nvidia-utils lib32-nvidia-utils libva-nvidia-driver
+fi
 
 step "yay i narzędzia Limine z AUR"
 if ! command -v yay >/dev/null; then
@@ -93,24 +114,49 @@ fi
 grep -E '^HOOKS=' /etc/mkinitcpio.conf
 sudo sed -i -E "s/^PRESETS=.*/PRESETS=('default')/" /etc/mkinitcpio.d/linux.preset
 sudo rm -f /boot/initramfs-linux-fallback.img
+if [[ $NVIDIA == yes ]]; then
+    # wczesny KMS: splash i Hyprland od pierwszej klatki na nvidia_drm;
+    # hook kms wciągałby nouveau do initramfs
+    sudo install -m 644 /dev/stdin /etc/mkinitcpio.conf.d/nvidia.conf \
+        <<< 'MODULES+=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)'
+    sudo sed -i -E '/^HOOKS=/ s/ kms( |\))/\1/' /etc/mkinitcpio.conf
+fi
 
 step "/etc/default/limine"
 src=$(findmnt -no SOURCE / | sed 's/\[.*//')
 partuuid=$(lsblk -no PARTUUID "$src")
+extra=""
+[[ $NVIDIA == yes ]] && extra=" nvidia_drm.modeset=1 nvidia_drm.fbdev=1"
 [[ -n $partuuid ]] || die "brak PARTUUID dla $src"
 [[ ! -e /etc/default/limine ]] || sudo cp -n /etc/default/limine /root/limine.default.bak
 sudo tee /etc/default/limine >/dev/null <<EOF
 ESP_PATH="/boot"
 TARGET_OS_NAME="Arch Linux"
 UEFI_BOOT_ORDER=first
-FIND_BOOTLOADERS=no
+FIND_BOOTLOADERS=yes
 ENABLE_UKI=no
 MKINITCPIO_FALLBACK=no
-KERNEL_CMDLINE[default]="root=PARTUUID=$partuuid rootflags=subvol=@ rootfstype=btrfs rw zswap.enabled=0 quiet splash"
+KERNEL_CMDLINE[default]="root=PARTUUID=$partuuid rootflags=subvol=@ rootfstype=btrfs rw zswap.enabled=0$extra quiet splash"
 EOF
 sudo limine-update
 sudo systemctl enable --now limine-snapper-sync.service
 sudo rm -f /boot/vmlinuz-linux /boot/initramfs-linux.img
+
+step "Partycje Windowsa i Ubuntu"
+add_mount() { # uuid katalog typ opcje
+    [[ -n $1 ]] || return 0
+    if ! sudo blkid -U "$1" >/dev/null; then warn "brak partycji UUID=$1, pomijam $2"; return 0; fi
+    grep -q "UUID=$1" /etc/fstab && return 0
+    sudo mkdir -p "$2"
+    [[ -e /etc/fstab.bak ]] || sudo cp /etc/fstab /etc/fstab.bak
+    printf 'UUID=%s\t%s\t%s\t%s\t0 0\n' "$1" "$2" "$3" "$4" | sudo tee -a /etc/fstab >/dev/null
+}
+# Windows tylko do odczytu: zapis do NTFS bezpieczny dopiero po wyłączeniu
+# Fast Startup w Windowsie (wtedy zmień ro na rw w /etc/fstab).
+add_mount "$WIN_UUID" /mnt/win ntfs3 "ro,nofail,x-systemd.device-timeout=5s,uid=$(id -u),gid=$(id -g),iocharset=utf8"
+add_mount "$UBUNTU_UUID" /mnt/ubuntu ext4 "rw,nofail,noatime,x-systemd.device-timeout=5s"
+sudo systemctl daemon-reload
+sudo mount -a || warn "mount -a zgłosił błąd, sprawdź /etc/fstab"
 
 step "zram"
 if [[ ! -e /etc/systemd/zram-generator.conf ]]; then
@@ -137,7 +183,8 @@ sudo snapper -c root create -d "czysta instalacja (bootstrap)" --print-number
 cat <<EOF
 
 ${b}Gotowe.${o} Dalej:
-  1. sudo reboot, sprawdź w menu Limine wpis "Arch Linux" i podmenu Snapshots,
+  1. sudo reboot, sprawdź w menu Limine wpis "Arch Linux", podmenu Snapshots
+     oraz wykryte wpisy Windows i Ubuntu,
   2. sprawdź kolejność: efibootmgr (firmware potrafi ją przestawić),
   3. uruchom Hyprland (start-hyprland), w kitty: ~/impasto/local/finish.sh
 EOF
