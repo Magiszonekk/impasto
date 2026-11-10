@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Okno sudo bez hasła (jak w omarchy). Pyta o czas i wywołuje ~/sw.sh.
+F=/run/sudo-window/$USER
+printf '\n  \e[1m󰌾  Sudo bez hasła\e[0m\n\n'
+if [[ -e $F ]]; then
+    end=$(systemctl list-timers sudo-window-off.timer --no-legend 2>/dev/null | awk '{print $4}')
+    printf '  Teraz: \e[32mWŁĄCZONE\e[0m%s\n\n' "${end:+ (do $end)}"
+else
+    printf '  Teraz: \e[2mwyłączone\e[0m\n\n'
+fi
+printf '  Na ile minut? [Enter = 15, 0 = wyłącz, q = anuluj]: '
+read -r min
+min=${min:-15}
+case $min in
+    q|Q) exit 0 ;;
+    0)
+        sudo sh -c 'rm -f /run/sudo-window/'"$USER"'; systemctl stop sudo-window-off.timer 2>/dev/null' \
+            && printf '\n  Wyłączone.\n' ;;
+    *[!0-9]*) printf '\n  To nie jest liczba.\n' ;;
+    *)
+        printf '\n'
+        sudo sh "$HOME/sw.sh" "$min" | sed 's/^/  /' ;;
+esac
+sleep 1.5

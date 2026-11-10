@@ -64,6 +64,7 @@ hl.config({
 bind(mainMod .. " + Return", hl.dsp.exec_cmd(apps.terminal),     { description = "Applications · Open a terminal" })
 bind(mainMod .. " + E",      hl.dsp.exec_cmd(apps.file_manager), { description = "Applications · Open the file manager" })
 bind(mainMod .. " + B",      hl.dsp.exec_cmd(apps.browser),      { description = "Applications · Open the browser" })
+bind("CTRL + SHIFT + Escape", hl.dsp.exec_cmd("kitty --class impasto-btop -e btop"), { description = "Applications · Open btop" })
 
 
 -- ── WINDOWS ─────────────────────────────────────────────────────────────────
@@ -117,7 +118,7 @@ end
 
 bind(mainMod .. " + Q",           hl.dsp.window.close(), { description = "Windows · Close the focused window" })
 bind(mainMod .. " + SHIFT + Q",   hl.dsp.window.kill(),  { description = "Windows · Kill the focused window" })
-bind(mainMod .. " + F",           hl.dsp.window.fullscreen({ mode = "fullscreen", action = "toggle" }), { description = "Windows · Full screen" })
+bind(mainMod .. " + F",           hl.dsp.window.fullscreen_state({ internal = 2, client = 0, action = "toggle" }), { description = "Windows · Full screen (app unaware, so browser keeps its tabs)" })
 bind(mainMod .. " + ALT + F",     hl.dsp.window.fullscreen({ mode = "maximized", action = "toggle" }),  { description = "Windows · Maximise, keeping the bar" })
 bind(mainMod .. " + ALT + Space", float_centred,          { description = "Windows · Float or tile the window" })
 bind(mainMod .. " + P",           hl.dsp.window.pseudo(), { description = "Windows · Toggle pseudo-tiling" })
@@ -139,6 +140,28 @@ bind(mainMod .. " + SHIFT + left",  hl.dsp.window.move({ direction = "l" }), { d
 bind(mainMod .. " + SHIFT + right", hl.dsp.window.move({ direction = "r" }), { description = "Windows · Move the window right" })
 bind(mainMod .. " + SHIFT + up",    hl.dsp.window.move({ direction = "u" }), { description = "Windows · Move the window up" })
 bind(mainMod .. " + SHIFT + down",  hl.dsp.window.move({ direction = "d" }), { description = "Windows · Move the window down" })
+
+-- · resize mode: SUPER+R, then arrows or h/j/k/l, Esc or Enter to leave
+local RESIZE_STEP = 40
+local function resize_by(x, y)
+    return hl.dsp.window.resize({ x = x, y = y, relative = true })
+end
+
+bind(mainMod .. " + R", hl.dsp.submap("resize"), { description = "Windows · Resize mode" })
+
+hl.define_submap("resize", function()
+    hl.bind("left",  resize_by(-RESIZE_STEP, 0), { repeating = true })
+    hl.bind("right", resize_by(RESIZE_STEP, 0),  { repeating = true })
+    hl.bind("up",    resize_by(0, -RESIZE_STEP), { repeating = true })
+    hl.bind("down",  resize_by(0, RESIZE_STEP),  { repeating = true })
+    hl.bind("h",     resize_by(-RESIZE_STEP, 0), { repeating = true })
+    hl.bind("l",     resize_by(RESIZE_STEP, 0),  { repeating = true })
+    hl.bind("k",     resize_by(0, -RESIZE_STEP), { repeating = true })
+    hl.bind("j",     resize_by(0, RESIZE_STEP),  { repeating = true })
+    hl.bind(mainMod .. " + R", hl.dsp.submap("reset"))
+    hl.bind("escape", hl.dsp.submap("reset"))
+    hl.bind("Return", hl.dsp.submap("reset"))
+end)
 
 -- · drag and resize with the mouse
 bind(mainMod .. " + mouse:272", hl.dsp.window.drag(),   { mouse = true, description = "Windows · Drag the window" })
@@ -300,6 +323,14 @@ bind(mainMod .. " + ALT + SHIFT + left",  trade_workspace("l"), { description = 
 bind(mainMod .. " + ALT + SHIFT + right", trade_workspace("r"), { description = "Screens · Take the workspace to the screen right" })
 
 
+-- ── SCRATCHPAD (magiszonek) ─────────────────────────────────────────────────
+
+-- · a special workspace pulled over the current one and hidden again, as in
+-- · Omarchy. SHIFT + 1…0 takes a window back out of it.
+bind(mainMod .. " + S",       hl.dsp.workspace.toggle_special("scratchpad"),            { description = "Workspaces · Show or hide the scratchpad" })
+bind(mainMod .. " + ALT + S", hl.dsp.window.move({ workspace = "special:scratchpad" }), { description = "Workspaces · Move the window to the scratchpad" })
+
+
 -- ── MEDIA KEYS ──────────────────────────────────────────────────────────────
 
 -- · volume and brightness; brightness goes through the shell, which knows
@@ -354,7 +385,7 @@ bind(mainMod .. " + SHIFT + T", hl.dsp.global("quickshell:palette"),    { descri
 bind(mainMod .. " + U",         hl.dsp.global("quickshell:stats"),      { description = "Shell · Open system statistics" })
 bind(mainMod .. " + SHIFT + P", hl.dsp.global("quickshell:pet"),        { description = "Shell · Open the pet" })
 bind(mainMod .. " + G",         hl.dsp.global("quickshell:games"),      { description = "Shell · Open the games" })
-bind(mainMod .. " + S",         hl.dsp.global("quickshell:notes"),      { description = "Shell · Open the notes" })
+bind(mainMod .. " + N",         hl.dsp.global("quickshell:notes"),      { description = "Shell · Open the notes" })
 bind(mainMod .. " + K",         hl.dsp.global("quickshell:board"),      { description = "Shell · Open the task board" })
 
 -- · key sheet, read from `hyprctl binds`. H, since / is SHIFT + 7 on a

@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Comiesięczna aktualizacja systemu z przypiętego snapshotu Arch Linux Archive.
+# Użycie: sys-update            -> przesuwa datę na 1. dzień bieżącego miesiąca
+#         sys-update RRRR/MM/DD -> przesuwa na podaną datę (np. pilna poprawka)
+set -euo pipefail
+
+MIRRORLIST=/etc/pacman.d/mirrorlist
+ARCHIVE=https://archive.archlinux.org/repos
+# Katalog z impasto (fork). Uzupełnij po instalacji impasto.
+IMPASTO_DIR="${IMPASTO_DIR:-$HOME/impasto}"
+# Komenda przebudowy pluginów Hyprlanda w impasto (uzupełnić po przeczytaniu ./setup).
+IMPASTO_REBUILD_CMD="${IMPASTO_REBUILD_CMD:-./setup plugins}"
+
+c_b=$'\e[1m'; c_g=$'\e[32m'; c_y=$'\e[33m'; c_r=$'\e[31m'; c_0=$'\e[0m'
+die() { echo "${c_r}BŁĄD:${c_0} $*" >&2; exit 1; }
+
+cur=$(grep -oE 'archive\.archlinux\.org/repos/[0-9]{4}/[0-9]{2}/[0-9]{2}' "$MIRRORLIST" | head -1 | cut -d/ -f3-) \
+  || die "W $MIRRORLIST nie ma przypiętej daty archiwum."
+new="${1:-$(date +%Y/%m/01)}"
+[[ "$new" =~ ^[0-9]{4}/[0-9]{2}/[0-9]{2}$ ]] || die "Zły format daty: $new (oczekiwano RRRR/MM/DD)"
+
+echo "${c_b}Obecny snapshot repo:${c_0}  $cur"
+echo "${c_b}Nowy snapshot repo:${c_0}    $new"
+
+if [[ "$new" == "$cur" ]]; then
+  echo "${c_g}Data się nie zmienia, nic do zrobienia.${c_0}"; exit 0
+fi
+if [[ "$new" < "$cur" ]]; then
+  echo "${c_y}UWAGA: nowa data jest WCZEŚNIEJSZA niż obecna. pacman -Su nie zrobi downgrade'u (to robi -Suu). Przerywam.${c_0}"
+  exit 1
+fi
+
+code=$(curl -s -o /dev/null -w '%{http_code}' "$ARCHIVE/$new/core/os/x86_64/core.db" || true)
+[[ "$code" == 200 ]] || die "Snapshot $new nie istnieje w archiwum (HTTP $code)."
+
+hypr_new=$(curl -s "$ARCHIVE/$new/extra/os/x86_64/extra.db" | bsdtar -tf - 2>/dev/null | grep -oE '^hyprland-[0-9][^/]*' | head -1 | sed 's/^hyprland-//')
+echo "${c_b}Hyprland w nowym snapshocie:${c_0} ${hypr_new:-?}  (zainstalowany: $(pacman -Q hyprland 2>/dev/null | cut -d' ' -f2 || echo brak))"
+
+read -rp "Kontynuować aktualizację? [t/N] " ans
+[[ "$ans" =~ ^[tTyY]$ ]] || { echo "Anulowano."; exit 0; }
+
+ver() { pacman -Q "$1" 2>/dev/null | cut -d' ' -f2 || true; }
+linux_before=$(ver linux); hypr_before=$(ver hyprland)
+last_snap_before=$(snapper -c root --csvout list --columns number 2>/dev/null | tail -1 || echo 0)
+
+echo "${c_b}==> Przesuwam datę w mirrorlist${c_0}"
+sudo sed -i -E "s#(archive\.archlinux\.org/repos/)[0-9]{4}/[0-9]{2}/[0-9]{2}#\1$new#" "$MIRRORLIST"
+grep -E '^Server' "$MIRRORLIST"
+
+echo "${c_b}==> Aktualizacja kluczy${c_0}"
+sudo pacman -Sy --needed --noconfirm archlinux-keyring
+echo "${c_b}==> Pełna aktualizacja (snap-pac robi snapshoty pre/post)${c_0}"
+sudo pacman -Su
+
+if command -v yay >/dev/null; then
+  echo "${c_b}==> Aktualizacja AUR${c_0}"
+  yay -Sua || echo "${c_y}yay -Sua zakończył się błędem: sprawdź ręcznie.${c_0}"
+fi
+
+linux_after=$(ver linux); hypr_after=$(ver hyprland)
+
+if [[ -n "$hypr_after" && "$hypr_before" != "$hypr_after" ]]; then
+  echo "${c_y}==> Hyprland: $hypr_before -> $hypr_after. Trzeba przebudować pluginy impasto.${c_0}"
+  if [[ -n "$IMPASTO_REBUILD_CMD" && -d "$IMPASTO_DIR" ]]; then
+    (cd "$IMPASTO_DIR" && eval "$IMPASTO_REBUILD_CMD")
+  else
+    echo "   (IMPASTO_REBUILD_CMD nie jest ustawione, zrób to ręcznie z działającej sesji Hyprlanda)"
+  fi
+fi
+
+first_snap=$(snapper -c root --csvout list --columns number,type,description 2>/dev/null \
+  | awk -F, -v b="$last_snap_before" 'NR>1 && $1+0>b+0 && $2=="pre"{print $1; exit}')
+
+echo
+echo "${c_b}===== PODSUMOWANIE =====${c_0}"
+echo "Snapshot repozytoriów: $cur -> ${c_g}$new${c_0}"
+echo "linux:    $linux_before -> $linux_after"
+echo "hyprland: ${hypr_before:-brak} -> ${hypr_after:-brak}"
+if [[ -n "$first_snap" ]]; then
+  echo "Rollback: snapshot snappera ${c_b}#$first_snap${c_0} (stan sprzed aktualizacji, widoczny w menu Limine → Snapshots)"
+fi
+if [[ "$linux_before" != "$linux_after" ]]; then
+  echo "${c_y}Zmienił się kernel: zrób reboot.${c_0}"
+fi

@@ -88,6 +88,28 @@ hl.window_rule({
 })
 
 
+-- · lokalny dodatek: okno sudo bez hasła z przycisku na pasku
+hl.window_rule({
+    name  = "sudo-window",
+    match = { class = "^(impasto-sudo)$" },
+
+    float  = true,
+    center = true,
+    size   = {560, 240},
+})
+
+
+-- · lokalny dodatek: btop w wyśrodkowanym oknie (CTRL+SHIFT+ESC)
+hl.window_rule({
+    name  = "btop-window",
+    match = { class = "^(impasto-btop)$" },
+
+    float  = true,
+    center = true,
+    size   = {1100, 700},
+})
+
+
 -- ── APPS ────────────────────────────────────────────────────────────────────
 
 hl.window_rule({
@@ -191,4 +213,15 @@ hl.layer_rule({
 
     blur         = true,
     ignore_alpha = 0.12,
+})
+
+
+-- · lokalny dodatek: okno testu prędkości z przycisku na pasku
+hl.window_rule({
+    name  = "speedtest-window",
+    match = { class = "^(impasto-speedtest)$" },
+
+    float  = true,
+    center = true,
+    size   = {680, 560},
 })

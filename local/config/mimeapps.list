@@ -1,0 +1,14 @@
+[Default Applications]
+text/html=brave-browser.desktop
+application/pdf=brave-browser.desktop
+x-scheme-handler/http=brave-browser.desktop
+x-scheme-handler/https=brave-browser.desktop
+text/plain=dev.zed.Zed.desktop
+application/json=dev.zed.Zed.desktop
+image/jpeg=imv.desktop
+image/png=imv.desktop
+image/gif=imv.desktop
+image/webp=imv.desktop
+image/svg+xml=imv.desktop
+inode/directory=org.gnome.Nautilus.desktop
+x-scheme-handler/discord=vesktop.desktop

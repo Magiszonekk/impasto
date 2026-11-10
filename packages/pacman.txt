@@ -159,3 +159,9 @@ qemu-desktop                 # the qemu quickemu runs · quickemu is from the AU
 
 lua                          # luac, for ./setup check
 inotify-tools                # ./setup sync --watch, which copies every save
+
+
+# ── LOCAL (magiszonek) ──────────────────────────────────────────────────────
+
+filezilla
+zed                          # domyślny edytor tekstu

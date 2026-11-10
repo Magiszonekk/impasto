@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""Okno testu prędkości z żywym prędkościomierzem (jak w omarchy).
+
+Pomiar przez speed.cloudflare.com: ping, pobieranie, wysyłanie. Wskazówka
+rusza się w trakcie testu, na końcu zostają trzy wyniki.
+"""
+import http.client
+import math
+import os
+import re
+import ssl
+import statistics
+import sys
+import threading
+import time
+
+HOST = "speed.cloudflare.com"
+STREAMS = 4
+PHASE_SECONDS = 8.0
+WARMUP = 1.5
+GAUGE_MAX = 1000.0  # Mb/s na końcu skali (skala pierwiastkowa)
+
+R, G, B, C, D, BOLD, X = ("\033[31m", "\033[32m", "\033[34m", "\033[36m",
+                          "\033[2m", "\033[1m", "\033[0m")
+
+CTX = ssl.create_default_context()
+
+
+class Meter:
+    def __init__(self):
+        self.bytes = 0
+        self.lock = threading.Lock()
+        self.stop = False
+
+    def add(self, n):
+        with self.lock:
+            self.bytes += n
+
+
+def worker_down(m):
+    while not m.stop:
+        try:
+            c = http.client.HTTPSConnection(HOST, context=CTX, timeout=10)
+            c.request("GET", "/__down?bytes=50000000")
+            r = c.getresponse()
+            while not m.stop:
+                chunk = r.read(65536)
+                if not chunk:
+                    break
+                m.add(len(chunk))
+            c.close()
+        except Exception:
+            time.sleep(0.2)
+
+
+def worker_up(m):
+    block = b"\0" * 65536
+    size = 20_000_000
+    while not m.stop:
+        try:
+            c = http.client.HTTPSConnection(HOST, context=CTX, timeout=10)
+            c.putrequest("POST", "/__up")
+            c.putheader("Content-Length", str(size))
+            c.endheaders()
+            sent = 0
+            while sent < size and not m.stop:
+                c.send(block)
+                sent += len(block)
+                m.add(len(block))
+            if not m.stop:
+                c.getresponse().read()
+            c.close()
+        except Exception:
+            time.sleep(0.2)
+
+
+def ping():
+    times = []
+    c = http.client.HTTPSConnection(HOST, context=CTX, timeout=5)
+    for _ in range(8):
+        t = time.perf_counter()
+        c.request("GET", "/__down?bytes=0")
+        c.getresponse().read()
+        times.append((time.perf_counter() - t) * 1000)
+    c.close()
+    times = times[1:]  # pierwszy zawiera handshake TLS
+    return statistics.median(times), (max(times) - min(times))
+
+
+# ── rysowanie ───────────────────────────────────────────────────────────────
+
+W, H = 25, 11  # promień w kolumnach (komórka ~2:1) i wysokość łuku
+
+
+def frac(v):
+    return min(1.0, math.sqrt(max(v, 0) / GAUGE_MAX))
+
+
+def gauge(value, color):
+    """Półokrągły łuk z podziałką i wskazówką. Zwraca listę linii."""
+    cols = W * 2 + 1
+    grid = [[" "] * cols for _ in range(H + 1)]
+    cx, cy = W, H
+    f = frac(value)
+
+    def put(x, y, ch, col):
+        xi, yi = int(round(x)), int(round(y))
+        if 0 <= xi < cols and 0 <= yi <= H:
+            grid[yi][xi] = col + ch + X
+
+    n = 140
+    for i in range(n + 1):
+        t = i / n
+        a = math.pi * (1 - t)
+        x = cx + math.cos(a) * W
+        y = cy - math.sin(a) * (H - 0.5)
+        put(x, y, "●" if t <= f else "·", color if t <= f else D)
+
+    for mark in (0, 10, 50, 100, 250, 500, 1000):
+        t = math.sqrt(mark / GAUGE_MAX)
+        a = math.pi * (1 - t)
+        x = cx + math.cos(a) * (W - 3.5)
+        y = cy - math.sin(a) * (H - 0.5 - 2)
+        label = str(mark)
+        x0 = int(round(x - len(label) / 2))
+        for k, ch in enumerate(label):
+            put(x0 + k, y, ch, D)
+
+    a = math.pi * (1 - f)
+    steps = 40
+    for i in range(3, steps):
+        r = i / steps
+        put(cx + math.cos(a) * (W - 6) * r, cy - math.sin(a) * (H - 3) * r,
+            "•", BOLD + color)
+    put(cx, cy, "◉", BOLD)
+
+    return ["".join(row) for row in grid]
+
+
+BLOCK_W = 2 * W + 1   # szerokość łuku w kolumnach
+BELOW = 5             # wiersze pod liczbą: do 3 wyników, pasek/odstęp, podpowiedź
+BLOCK_H = 3 + (H + 1) + 2 + BELOW  # stała wysokość, żeby nic nie skakało
+
+ANSI = re.compile(r"\033\[[0-9;]*m")
+
+
+def centred(text, pad):
+    """Wyśrodkowuje wiersz względem łuku (długość liczona bez kodów ANSI)."""
+    n = len(ANSI.sub("", text))
+    return pad + " " * max(0, (BLOCK_W - n) // 2) + text
+
+
+def draw(title, value, color, lines_below):
+    cols, lines = os.get_terminal_size() if sys.stdout.isatty() else (80, 24)
+    pad = " " * max(0, (cols - BLOCK_W) // 2)
+    top = max(0, (lines - BLOCK_H) // 2)
+    rows = [""] * top
+    rows += [centred(f"{BOLD}󰓅  Speed test{X}   {D}speed.cloudflare.com{X}", pad),
+             "", centred(title, pad)]
+    rows += [pad + line for line in gauge(value, color)]
+    rows.append(f"{pad}{' ' * (W - 6)}{BOLD}{color}{value:7.1f}{X} Mb/s")
+    rows.append("")
+    below = [centred(line.strip(), pad) if line.strip() else "" for line in lines_below]
+    rows += below + [""] * (BELOW - len(below))
+    out = "\033[H" + "".join(r + "\033[K\n" for r in rows) + "\033[J"
+    sys.stdout.write(out)
+    sys.stdout.flush()
+
+
+def run_phase(name, color, worker, results):
+    m = Meter()
+    for _ in range(STREAMS):
+        threading.Thread(target=worker, args=(m,), daemon=True).start()
+    t0 = time.perf_counter()
+    window = []
+    shown = 0.0
+    warm = None
+    while True:
+        now = time.perf_counter() - t0
+        if now >= PHASE_SECONDS:
+            break
+        with m.lock:
+            b = m.bytes
+        window.append((now, b))
+        window = [w for w in window if now - w[0] <= 1.0]
+        if now >= WARMUP and warm is None:
+            warm = (now, b)
+        if len(window) >= 2 and now - window[0][0] > 0.15:
+            inst = (b - window[0][1]) * 8 / 1e6 / (now - window[0][0])
+        else:
+            inst = 0.0
+        shown += (inst - shown) * 0.35  # wygładzanie wskazówki
+        bar = int(now / PHASE_SECONDS * 40)
+        prog = f"{color}{'━' * bar}{X}{D}{'━' * (40 - bar)}{X}"
+        draw(f"{BOLD}{name}{X}", shown, color, results + ["  " + prog])
+        time.sleep(0.05)
+    m.stop = True
+    with m.lock:
+        b = m.bytes
+    end = time.perf_counter() - t0
+    if warm and end > warm[0]:
+        return (b - warm[1]) * 8 / 1e6 / (end - warm[0])
+    return b * 8 / 1e6 / end
+
+
+def main():
+    sys.stdout.write("\033[?1049h\033[?25l\033[2J")
+    results = []
+    try:
+        draw(f"{BOLD}Ping{X}", 0, C, ["  Connecting..."])
+        try:
+            p, jitter = ping()
+        except Exception as e:
+            sys.stdout.write("\033[2J\033[H")
+            print(f"\n  {R}No connection to {HOST}{X}\n  {D}{e}{X}")
+            input("\n  Press Enter to close... ")
+            return
+        results.append(f"  Ping       {BOLD}{p:.0f} ms{X}  {D}(jitter {jitter:.0f} ms){X}")
+        down = run_phase("Download", G, worker_down, results)
+        results.append(f"  Download   {BOLD}{G}{down:.1f} Mb/s{X}")
+        up = run_phase("Upload", B, worker_up, results)
+        results.append(f"  Upload     {BOLD}{B}{up:.1f} Mb/s{X}")
+        draw(f"{BOLD}Done{X}", down, G,
+             results + ["", f"  {D}Press any key to close{X}"])
+        os.system("stty -echo -icanon min 1 2>/dev/null")
+        sys.stdin.read(1)
+    finally:
+        sys.stdout.write("\033[?25h\033[?1049l")
+        os.system("stty sane 2>/dev/null")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.stdout.write("\033[?25h\033[?1049l")

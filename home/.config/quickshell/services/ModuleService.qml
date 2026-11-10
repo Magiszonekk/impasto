@@ -85,13 +85,27 @@ Singleton {
     // Capture is what the capture key does: the photo is taken at once, so
     // whatever the island has open is in it.
     readonly property var buttonIds: ["launcher", "overview", "controls", "capture",
-        "appearance", "notes", "board", "games", "keys", "packages", "settings", "session"]
+        "appearance", "notes", "board", "games", "keys", "packages", "settings", "session", "sudo", "speedtest"]
 
     readonly property var buttons: {
         const out = {}
         for (const id of root.buttonIds) {
             if (id === "controls") {
                 out[id] = { name: "Control centre", glyph: "󰨚", panel: "controls" }
+                continue
+            }
+            // Lokalny dodatek: okno sudo bez hasła (~/.local/bin/sudo-window).
+            if (id === "sudo") {
+                out[id] = { name: "Sudo window", glyph: "󰌾",
+                            action: () => Quickshell.execDetached(["kitty", "--class", "impasto-sudo",
+                                "--title", "sudo-window", Quickshell.env("HOME") + "/.local/bin/sudo-window"]) }
+                continue
+            }
+            // Lokalny dodatek: test prędkości łącza (~/.local/bin/speedtest-window).
+            if (id === "speedtest") {
+                out[id] = { name: "Speed test", glyph: "󰓅",
+                            action: () => Quickshell.execDetached(["kitty", "--class", "impasto-speedtest",
+                                "--title", "speedtest", Quickshell.env("HOME") + "/.local/bin/speedtest-window"]) }
                 continue
             }
             if (id === "capture") {

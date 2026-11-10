@@ -42,8 +42,8 @@ lavat                        # the lava function
 
 # ── THEMED APPLICATIONS ─────────────────────────────────────────────────────
 
-vscodium-bin                 # extensions and settings · ./setup vscodium
-zen-browser-bin
+# vscodium-bin                 # extensions and settings · ./setup vscodium
+# zen-browser-bin
 vesktop-bin
 spotify
 spicetify-cli                # applies the palette to Spotify · ./setup spotify
@@ -64,3 +64,8 @@ quickemu                     # the machines panel · brings quickget, spicy and 
 
 # · python-mediapipe-bin is not listed: ./setup camera installs it with the
 # · virtual camera, and only where there is a webcam.
+
+
+# ── LOCAL (magiszonek) ──────────────────────────────────────────────────────
+
+brave-bin                    # domyślna przeglądarka
