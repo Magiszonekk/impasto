@@ -5,9 +5,10 @@
 # Potem uruchom Hyprland i odpal local/finish.sh.
 #
 # Odtwarza: snapper + snap-pac, limine-snapper-sync, btrfs-overlayfs,
-# /etc/default/limine (z wykrywaniem Windowsa/Ubuntu), multilib, sterownik
-# NVIDIA z wczesnym KMS, /mnt/win i /mnt/ubuntu, przypięty mirrorlist
-# (Arch Linux Archive), okno sudo.
+# /etc/default/limine, wpisy Windows/Ubuntu z innej partycji ESP
+# (bin/limine-dualboot), multilib, sterownik NVIDIA z wczesnym KMS, polską
+# klawiaturę (TTY i SDDM), /mnt/win i /mnt/ubuntu, przypięty mirrorlist
+# (Arch Linux Archive), okno sudo, a na końcu hyprland i kitty do kroku 3.
 # Skrypt jest idempotentny: kroki, które już są zrobione, pomija.
 # PIN_DATE=RRRR/MM/DD ./bootstrap.sh  -> inna data niż "wczoraj".
 set -euo pipefail
@@ -16,6 +17,9 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PIN_DATE=${PIN_DATE:-$(date -d yesterday +%Y/%m/%d)}
 ARCHIVE=https://archive.archlinux.org/repos
 USER_NAME=$(id -un)
+# Układ klawiatury: konsola (vconsole) i X11 (ekran logowania SDDM).
+# Hyprland ma swój w home/.config/hypr/modules/input.lua.
+KEYMAP=${KEYMAP:-pl}
 # Partycje innych systemów do podmontowania (pusta wartość = pomiń).
 WIN_UUID=${WIN_UUID-7CC22557C2251744}
 UBUNTU_UUID=${UBUNTU_UUID-94acddf2-85da-4eba-9441-bbfd66d23463}
@@ -42,6 +46,12 @@ if ! grep -qE '^\[multilib\]' /etc/pacman.conf; then
     sudo sed -i -E '/^#\[multilib\]$/,/^#Include/ s/^#//' /etc/pacman.conf
 fi
 grep -qE '^\[multilib\]' /etc/pacman.conf || die "nie udało się włączyć multilib w /etc/pacman.conf"
+
+step "Klawiatura: $KEYMAP (konsola i ekran logowania)"
+# przed mkinitcpio: hook keymap/sd-vconsole wkłada ten układ do initramfs
+sudo localectl set-keymap "$KEYMAP"
+sudo localectl set-x11-keymap --no-convert "$KEYMAP"
+localectl status | grep -E 'VC Keymap|X11 Layout'
 
 step "Przypięcie repozytoriów do $PIN_DATE"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$ARCHIVE/$PIN_DATE/core/os/x86_64/core.db" || true)
@@ -133,7 +143,7 @@ sudo tee /etc/default/limine >/dev/null <<EOF
 ESP_PATH="/boot"
 TARGET_OS_NAME="Arch Linux"
 UEFI_BOOT_ORDER=first
-FIND_BOOTLOADERS=yes
+FIND_BOOTLOADERS=no
 ENABLE_UKI=no
 MKINITCPIO_FALLBACK=no
 KERNEL_CMDLINE[default]="root=PARTUUID=$partuuid rootflags=subvol=@ rootfstype=btrfs rw zswap.enabled=0$extra quiet splash"
@@ -141,6 +151,12 @@ EOF
 sudo limine-update
 sudo systemctl enable --now limine-snapper-sync.service
 sudo rm -f /boot/vmlinuz-linux /boot/initramfs-linux.img
+
+# FIND_BOOTLOADERS szuka tylko w ESP_PATH (/boot), a Windows i Ubuntu mają
+# bootloadery na innej partycji ESP; znajdował tylko własny fallback Limine.
+# Wpisy chainload robi limine-dualboot na podstawie NVRAM.
+step "Limine: Windows i Ubuntu (chainload z innej partycji ESP)"
+sudo "$HERE/bin/limine-dualboot" || warn "limine-dualboot nie zadziałał; dodaj wpisy ręcznie w /boot/limine.conf"
 
 step "Partycje Windowsa i Ubuntu"
 add_mount() { # uuid katalog typ opcje
@@ -177,6 +193,10 @@ systemctl --user enable sys-update-reminder.timer tools-autoupdate.timer 2>/dev/
 sudo install -m 440 /dev/stdin /etc/sudoers.d/98-sudo-window-include <<< '@includedir /run/sudo-window'
 sudo visudo -c >/dev/null && echo "sudoers OK"
 
+# Krok 3 poniżej (start-hyprland, kitty) potrzebuje ich przed ./setup install.
+step "Hyprland i kitty"
+sudo pacman -S --needed --noconfirm hyprland kitty
+
 step "Snapshot bazowy"
 sudo snapper -c root create -d "czysta instalacja (bootstrap)" --print-number
 
@@ -184,7 +204,7 @@ cat <<EOF
 
 ${b}Gotowe.${o} Dalej:
   1. sudo reboot, sprawdź w menu Limine wpis "Arch Linux", podmenu Snapshots
-     oraz wykryte wpisy Windows i Ubuntu,
+     oraz wpisy Windows Boot Manager i Ubuntu,
   2. sprawdź kolejność: efibootmgr (firmware potrafi ją przestawić),
   3. uruchom Hyprland (start-hyprland), w kitty: ~/impasto/local/finish.sh
 EOF
