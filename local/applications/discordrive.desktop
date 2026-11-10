@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Discordrive
+Exec=@HOME@/Applications/discordrive.AppImage
+Icon=@HOME@/.local/share/icons/discordrive.png
+Type=Application
+Categories=Utility;
+Terminal=false

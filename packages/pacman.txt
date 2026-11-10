@@ -165,3 +165,5 @@ inotify-tools                # ./setup sync --watch, which copies every save
 
 filezilla
 zed                          # domyślny edytor tekstu
+fuse2                        # discordrive (AppImage)
+fuse3                        # discordrive: dysk wirtualny (fusermount3)

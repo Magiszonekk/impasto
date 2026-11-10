@@ -50,6 +50,21 @@ for t in claude hermes; do
     herdr integration install "$t" || warn "integracja herdr/$t nie zadziałała"
 done
 
+step "Discordrive (AppImage + wpis w menu)"
+mkdir -p ~/Applications ~/.local/share/applications ~/.local/share/icons
+if [[ ! -x ~/Applications/discordrive.AppImage ]]; then
+    url=$(curl -fsSL https://api.github.com/repos/Magiszonekk/discordrive/releases/tags/main-build \
+        | grep -o 'https://[^"]*linux-x86_64\.AppImage' | head -1)
+    if [[ -n $url ]]; then
+        curl -fL "$url" -o ~/Applications/discordrive.AppImage && chmod +x ~/Applications/discordrive.AppImage
+    else
+        warn "nie znaleziono AppImage Discordrive w releasie main-build, pomijam"
+    fi
+fi
+cp "$HERE/icons/discordrive.png" ~/.local/share/icons/discordrive.png
+sed "s|@HOME@|$HOME|g" "$HERE/applications/discordrive.desktop" > ~/.local/share/applications/discordrive.desktop
+update-desktop-database ~/.local/share/applications 2>/dev/null || true
+
 step "Domyślne aplikacje i układ paska"
 [[ -e ~/.config/mimeapps.list ]] && cp -n ~/.config/mimeapps.list ~/.config/mimeapps.list.pre-local
 cp "$HERE/config/mimeapps.list" ~/.config/mimeapps.list
