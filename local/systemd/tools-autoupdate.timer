@@ -1,0 +1,10 @@
+[Unit]
+Description=Codzienne wywołanie tools-autoupdate (skrypt sam pilnuje odstępu 3 dni)
+
+[Timer]
+OnCalendar=*-*-* 12:30:00
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

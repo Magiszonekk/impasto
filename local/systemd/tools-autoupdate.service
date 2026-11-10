@@ -1,0 +1,9 @@
+[Unit]
+Description=Autoupdate Hermes i herdr
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/tools-autoupdate
+Nice=10
