@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# Wpisy chainload w Limine dla systemów, których bootloader leży na INNEJ
+# partycji ESP niż /boot (u mnie: Windows i Ubuntu na p1, Arch na p6).
+# FIND_BOOTLOADERS w limine-entry-tool przeszukuje tylko ESP_PATH, więc ich
+# nie widzi. Źródłem są wpisy UEFI w NVRAM (efibootmgr -v): nazwa, PARTUUID
+# partycji i ścieżka do pliku .efi. Wpis o istniejącej już nazwie jest pomijany,
+# więc ponowne uruchomienie jest bezpieczne.
+#
+# Użycie: sudo limine-dualboot          dopisuje wpisy i odpala limine-update
+#         limine-dualboot --dry         tylko pokazuje, co by dopisał
+set -euo pipefail
+
+CONF=${LIMINE_CONF:-/boot/limine.conf}
+ESP=${ESP_PATH:-/boot}
+PRIORITY=30   # Arch ma 50, "EFI fallback" 10: wyżej = wyżej w menu
+DRY=0; [[ ${1:-} == --dry ]] && DRY=1
+
+die() { echo "limine-dualboot: $*" >&2; exit 1; }
+(( DRY )) || [[ $EUID -eq 0 ]] || die "uruchom przez sudo (albo z --dry)"
+command -v efibootmgr >/dev/null || die "brak efibootmgr"
+(( DRY )) || [[ -f $CONF ]] || die "brak $CONF, najpierw: limine-update"
+
+esp_guid=$(lsblk -no PARTUUID "$(findmnt -no SOURCE "$ESP")")
+esp_guid=${esp_guid,,}
+[[ -n $esp_guid ]] || die "nie znam PARTUUID dla $ESP"
+
+# "Boot0000* Windows Boot Manager<TAB>HD(1,GPT,<guid>,...)/\EFI\...\X.EFI<dane>"
+# Za ścieżką Windowsa efibootmgr dokleja bez separatora dane binarne, stąd
+# ścieżka jest ucinana na pierwszym ".efi".
+entries=$(efibootmgr -v | sed -nE \
+    's/^Boot[0-9A-Fa-f]{4}\*? (.*[^[:space:]])[[:space:]]+HD\([0-9]+,GPT,([0-9A-Fa-f-]+),[^)]*\)\/(\\[^.]*\.[Ee][Ff][Ii]).*/\1\t\2\t\3/p')
+
+# Prawdziwa pisownia ścieżki na partycji (NVRAM ma ją zwykle WIELKIMI
+# literami), przy okazji sprawdza, że plik istnieje. Partycję montuje tylko
+# do odczytu, chyba że już gdzieś jest zamontowana.
+MNTS=()
+cleanup() { local m; for m in "${MNTS[@]}"; do umount "$m" && rmdir "$m"; done; }
+trap cleanup EXIT
+REAL=""
+real_path() { # guid ścieżka -> $REAL
+    local dev mnt found
+    dev=$(readlink -f "/dev/disk/by-partuuid/$1")
+    mnt=$(findmnt -rno TARGET --source "$dev" 2>/dev/null | head -1 || true)
+    if [[ -z $mnt ]]; then
+        mnt=$(mktemp -d /run/limine-dualboot.XXXXXX)
+        mount -o ro "$dev" "$mnt" || { rmdir "$mnt"; return 1; }
+        MNTS+=("$mnt")
+    fi
+    found=$(find "$mnt" -ipath "$mnt$2" -type f -print -quit)
+    [[ -n $found ]] || return 1
+    REAL=${found#"$mnt"}
+}
+
+block=""; seen=""
+while IFS=$'\t' read -r name guid path; do
+    [[ -n $name ]] || continue
+    guid=${guid,,}
+    [[ $guid != "$esp_guid" ]] || continue              # nasz ESP: Limine i jego fallback
+    [[ ${name,,} != *limine* ]] || continue
+    [[ $seen != *"|$guid$path|"* ]] || continue         # ten sam loader dwa razy w NVRAM
+    seen+="|$guid$path|"
+    if ! blkid -t PARTUUID="$guid" >/dev/null 2>&1 && [[ ! -e /dev/disk/by-partuuid/$guid ]]; then
+        echo "pomijam \"$name\": partycja $guid nie istnieje (stary wpis w NVRAM)"; continue
+    fi
+    path=${path//\\//}
+    if [[ -r $CONF ]] && grep -qxF "/$name" "$CONF"; then
+        echo "jest już: $name"; continue
+    fi
+    if (( ! DRY )); then
+        real_path "$guid" "$path" || { echo "pomijam \"$name\": brak $path na $guid"; continue; }
+        path=$REAL
+    fi
+    echo "dodaję: $name -> guid($guid):$path"
+    block+=$'\n'"/$name"$'\n'"comment: chainload z innej partycji ESP (local/bin/limine-dualboot)"$'\n'"comment: order-priority=$PRIORITY"$'\n'"protocol: efi"$'\n'"path: guid($guid):$path"$'\n'
+done <<< "$entries"
+
+[[ -n $block ]] || { echo "nic do dodania"; exit 0; }
+(( DRY )) && exit 0
+
+[[ -e $CONF.pre-dualboot ]] || cp "$CONF" "$CONF.pre-dualboot"
+printf '%s' "$block" >> "$CONF"
+
+# limine-update na nowo podpisuje config (jeśli włączone enroll) i porządkuje
+# wpisy; sprawdzamy, czy nasze przetrwały.
+limine-update >/dev/null
+while IFS=$'\t' read -r name _; do
+    [[ $block == *$'\n'"/$name"$'\n'* ]] || continue
+    grep -qxF "/$name" "$CONF" || die "limine-update usunął wpis \"$name\"; kopia: $CONF.pre-dualboot"
+done <<< "$entries"
+echo "OK. Menu: limine-entry-tool --tree 1"

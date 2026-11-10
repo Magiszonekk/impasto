@@ -51,3 +51,13 @@ hl.env("IMPASTO_CAPTURES",   captures)
 hl.env("HYPRSHOT_DIR",       captures)
 hl.env("IMPASTO_RECORDINGS", recordings)
 hl.env("IMPASTO_CAMERA",     camera)
+
+-- · NVIDIA (local): VA-API i GLX przez sterownik własnościowy, tylko gdy
+-- · moduł nvidia jest załadowany.
+local nvidia = io.open("/proc/driver/nvidia/version")
+if nvidia then
+    nvidia:close()
+    hl.env("LIBVA_DRIVER_NAME",         "nvidia")
+    hl.env("__GLX_VENDOR_LIBRARY_NAME", "nvidia")
+    hl.env("NVD_BACKEND",               "direct")
+end
