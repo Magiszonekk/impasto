@@ -156,3 +156,11 @@ lava() {
 
 # · machine-specific settings, outside the repository
 [[ -r ~/.zshrc.local ]] && source ~/.zshrc.local
+
+# · greeting on every new kitty window (animated scene + system info). Only in
+#   kitty itself: icat animation does not work in tmux/herdr panes or over ssh.
+#   Off with: touch ~/.config/no-greeting
+if [[ -o interactive && -n $KITTY_WINDOW_ID && -z $TMUX && -z $HERDR_ENV && -z $SSH_TTY \
+      && ! -e ~/.config/no-greeting ]]; then
+    fa
+fi
