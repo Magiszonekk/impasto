@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Przypominajka o miesięcznym sys-update. Nic nie aktualizuje.
+# Powiadamia, gdy przypięty miesiąc w mirrorlist jest starszy niż bieżący.
+# Odpalana codziennie przez sys-update-reminder.timer (Persistent=true, więc
+# jeśli komputer był wyłączony w 1. dnia miesiąca, przypomni po starcie).
+set -u
+pin=$(grep -oE 'archive\.archlinux\.org/repos/[0-9]{4}/[0-9]{2}' "${MIRRORLIST:-/etc/pacman.d/mirrorlist}" | head -1 | cut -d/ -f3-) || exit 0
+[[ -n $pin ]] || exit 0                     # brak przypięcia (rolling): nic do roboty
+now=$(date +%Y/%m)
+[[ $pin < $now ]] || exit 0                 # już zaktualizowane w tym miesiącu
+
+msg="Repozytoria stoją na ${pin}. Uruchom: sys-update"
+state=${XDG_STATE_HOME:-$HOME/.local/state}/sys-update-reminder
+mkdir -p "$state"
+echo "$(date -Is) $msg" > "$state/last"
+
+notify-send -u normal -i system-software-update "Czas na aktualizację systemu" "$msg" 2>/dev/null || true

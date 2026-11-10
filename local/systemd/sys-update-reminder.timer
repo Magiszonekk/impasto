@@ -1,0 +1,10 @@
+[Unit]
+Description=Codzienne sprawdzenie, czy czas na sys-update
+
+[Timer]
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target

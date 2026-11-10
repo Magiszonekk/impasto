@@ -122,6 +122,12 @@ step "Okno sudo bez hasła i skrypty użytkownika"
 mkdir -p ~/.local/bin
 install -m 755 "$HERE"/bin/sudo-window "$HERE"/bin/sys-update "$HERE"/bin/speedtest-window ~/.local/bin/
 install -m 755 "$HERE"/bin/sw.sh ~/sw.sh
+install -m 755 "$HERE"/bin/sys-update-reminder ~/.local/bin/
+mkdir -p ~/.config/systemd/user
+install -m 644 "$HERE"/systemd/sys-update-reminder.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable sys-update-reminder.timer 2>/dev/null \
+    || warn "timer przypominajki: włącz po zalogowaniu do sesji: systemctl --user enable --now sys-update-reminder.timer"
 sudo install -m 440 /dev/stdin /etc/sudoers.d/98-sudo-window-include <<< '@includedir /run/sudo-window'
 sudo visudo -c >/dev/null && echo "sudoers OK"
 

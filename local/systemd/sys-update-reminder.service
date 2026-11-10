@@ -1,0 +1,6 @@
+[Unit]
+Description=Przypomnienie o miesięcznym sys-update (tylko powiadomienie)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/sys-update-reminder
