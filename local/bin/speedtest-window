@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
-"""Okno testu prędkości z żywym prędkościomierzem (jak w omarchy).
+"""Okno testu prędkości z prędkościomierzami (jak w omarchy).
 
-Pomiar przez speed.cloudflare.com: ping, pobieranie, wysyłanie. Wskazówka
-rusza się w trakcie testu, na końcu zostają łuki Download i Upload obok siebie oraz ping.
+Domyślnie mierzy przez speedtest-cli (serwer wybierany automatycznie, bez
+żywej wskazówki: narzędzie podaje wynik dopiero na końcu). Gdy speedtest-cli
+nie istnieje albo zawiedzie, przechodzi na speed.cloudflare.com z żywą
+wskazówką. Na końcu zostają łuki Download i Upload obok siebie oraz ping.
+
+  speedtest-window              speedtest-cli, w razie awarii Cloudflare
+  speedtest-window --cloudflare tylko Cloudflare
 """
 import http.client
+import json
 import math
 import os
 import re
+import shutil
 import ssl
 import statistics
+import subprocess
 import sys
 import threading
 import time
@@ -184,14 +192,14 @@ def draw(title, value, color, lines_below):
 GAP = 6  # odstęp między łukami na ekranie końcowym
 
 
-def draw_final(down, up, lines_below):
+def draw_final(down, up, lines_below, source=HOST):
     """Ekran końcowy: łuki Download i Upload obok siebie, wyniki pod spodem."""
     cols, lines = os.get_terminal_size() if sys.stdout.isatty() else (80, 24)
     total = BLOCK_W * 2 + GAP
     pad = " " * max(0, (cols - total) // 2)
     top = max(0, (lines - BLOCK_H) // 2)
     rows = [""] * top
-    head = f"{BOLD}󰓅  Speed test{X}   {D}speed.cloudflare.com{X}"
+    head = f"{BOLD}󰓅  Speed test{X}   {D}{source}{X}"
     n = len(ANSI.sub("", head))
     rows += [pad + " " * max(0, (total - n) // 2) + head, ""]
     mid = BLOCK_W // 2
@@ -253,34 +261,83 @@ def run_phase(name, color, worker, results):
     return b * 8 / 1e6 / end
 
 
-def main():
-    sys.stdout.write("\033[?1049h\033[?25l\033[2J")
-    results = []
+def run_cli():
+    """Test przez speedtest-cli. Zwraca słownik albo None, gdy się nie udał."""
+    exe = shutil.which("speedtest-cli")
+    if not exe:
+        return None
+    proc = subprocess.Popen([exe, "--json"], stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, text=True)
+    t0 = time.perf_counter()
+    spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
     try:
-        draw(f"{BOLD}Ping{X}", 0, C, ["  Connecting..."])
-        try:
-            p, jitter = ping()
-        except Exception as e:
-            sys.stdout.write("\033[2J\033[H")
-            print(f"\n  {R}No connection to {HOST}{X}\n  {D}{e}{X}")
-            input("\n  Press Enter to close... ")
-            return
-        results.append(f"  Ping       {BOLD}{p:.0f} ms{X}  {D}(jitter {jitter:.0f} ms){X}")
-        down = run_phase("Download", G, worker_down, results)
-        results.append(f"  Download   {BOLD}{G}{down:.1f} Mb/s{X}")
-        up = run_phase("Upload", B, worker_up, results)
-        results.append(f"  Upload     {BOLD}{B}{up:.1f} Mb/s{X}")
-        draw_final(down, up, [r for r in results if "Ping" in r] + ["", f"{D}Press any key to close{X}"])
+        while proc.poll() is None:
+            now = time.perf_counter() - t0
+            pos = int(now * 12) % 40
+            bar = D + "━" * 40 + X
+            bar = D + "━" * pos + X + C + "━━" + X + D + "━" * max(0, 38 - pos) + X
+            draw(f"{BOLD}Pomiar{X}", 0, C,
+                 [f"  {spin[int(now * 10) % len(spin)]}  speedtest-cli: serwer, pobieranie, wysyłanie",
+                  f"  {D}{now:4.0f} s (zwykle 20 do 40 s){X}", "  " + bar])
+            time.sleep(0.08)
+        out = proc.stdout.read()
+        if proc.returncode != 0:
+            return None
+        d = json.loads(out)
+        srv = d.get("server", {})
+        return {"down": d["download"] / 1e6, "up": d["upload"] / 1e6,
+                "ping": d["ping"], "jitter": None,
+                "source": f"speedtest-cli · {srv.get('name', '?')} · {srv.get('sponsor', '?')}"}
+    except (ValueError, KeyError, OSError):
+        return None
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+
+
+def run_cloudflare():
+    """Test przez Cloudflare. Rzuca Refused (429) albo OSError (brak sieci)."""
+    results = []
+    draw(f"{BOLD}Ping{X}", 0, C, ["  Connecting..."])
+    p, jitter = ping()
+    results.append(f"  Ping       {BOLD}{p:.0f} ms{X}  {D}(jitter {jitter:.0f} ms){X}")
+    down = run_phase("Download", G, worker_down, results)
+    results.append(f"  Download   {BOLD}{G}{down:.1f} Mb/s{X}")
+    up = run_phase("Upload", B, worker_up, results)
+    return {"down": down, "up": up, "ping": p, "jitter": jitter, "source": HOST}
+
+
+def main():
+    only_cf = "--cloudflare" in sys.argv[1:]
+    sys.stdout.write("\033[?1049h\033[?25l\033[2J")
+    try:
+        res = None if only_cf else run_cli()
+        fell_back = res is None and not only_cf
+        if res is None:
+            try:
+                res = run_cloudflare()
+            except Refused as e:
+                code, retry = e.args[0]
+                sys.stdout.write("\033[2J\033[H")
+                print(f"\n  {R}Serwer odmówił pomiaru (HTTP {code}){X}")
+                if code == 429:
+                    when = f" Spróbuj za ok. {int(retry) // 60} min." if (retry or "").isdigit() else ""
+                    print(f"  {D}Limit zapytań Cloudflare dla Twojego IP.{when}{X}")
+                input("\n  Press Enter to close... ")
+                return
+            except Exception as e:
+                sys.stdout.write("\033[2J\033[H")
+                print(f"\n  {R}Brak połączenia (speedtest-cli i {HOST}){X}\n  {D}{e}{X}")
+                input("\n  Press Enter to close... ")
+                return
+        jit = f"  {D}(jitter {res['jitter']:.0f} ms){X}" if res["jitter"] is not None else ""
+        info = [f"  Ping       {BOLD}{res['ping']:.0f} ms{X}{jit}"]
+        if fell_back:
+            info.append(f"  {D}speedtest-cli zawiódł, wynik z Cloudflare{X}")
+        draw_final(res["down"], res["up"], info + ["", f"{D}Press any key to close{X}"],
+                   res["source"])
         os.system("stty -echo -icanon min 1 2>/dev/null")
         sys.stdin.read(1)
-    except Refused as e:
-        code, retry = e.args[0]
-        sys.stdout.write("\033[2J\033[H")
-        print(f"\n  {R}Serwer odmówił pomiaru (HTTP {code}){X}")
-        if code == 429:
-            when = f" Spróbuj za ok. {int(retry) // 60} min." if (retry or "").isdigit() else ""
-            print(f"  {D}Limit zapytań Cloudflare dla Twojego IP.{when}{X}")
-        input("\n  Press Enter to close... ")
     finally:
         sys.stdout.write("\033[?25h\033[?1049l")
         os.system("stty sane 2>/dev/null")
