@@ -285,7 +285,7 @@ Singleton {
         case "network":
             return NetworkService.connectionName
         case "bluetooth":
-            return BluetoothService.summary
+            return root.clip(BluetoothService.summary, root.bluetoothChars)
         case "calendar":
             return Qt.formatDate(root.today.date, "ddd d")
         }
@@ -295,6 +295,23 @@ Singleton {
     // For the calendar's figure, which only changes at midnight.
     readonly property SystemClock today: SystemClock {
         precision: SystemClock.Minutes
+    }
+
+    // Local tweak: the bar shows only the first N characters of the Bluetooth
+    // device name; the full name is in the chip's tooltip (`BarChip.qml`).
+    readonly property int bluetoothChars: 10
+
+    function clip(text: string, max: int): string {
+        return text.length > max ? text.slice(0, max).replace(/\s+$/, "") + "…" : text
+    }
+
+    // Full text for a chip's tooltip, "" when the figure already says it all.
+    function tipOf(id: string): string {
+        if (id === "bluetooth") {
+            const full = BluetoothService.summary
+            return full.length > root.bluetoothChars ? full : ""
+        }
+        return ""
     }
 
     // Maximum width for text figures (track title, network or device name)

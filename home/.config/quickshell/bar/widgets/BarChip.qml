@@ -101,6 +101,52 @@ Item {
         reveal: root.reveal
     }
 
+    // Local tweak: tooltip with the full text when the figure is shortened.
+    readonly property string tip: root.button ? "" : ModuleService.tipOf(root.moduleId)
+
+    Timer {
+        id: tipDelay
+
+        interval: 350
+        running: mouse.containsMouse && root.tip !== ""
+    }
+
+    PopupWindow {
+        anchor.item: root
+        anchor.rect.x: 0
+        anchor.rect.y: 0
+        anchor.rect.width: root.width
+        anchor.rect.height: root.height + 8
+        anchor.edges: Edges.Bottom
+        anchor.gravity: Edges.Bottom
+
+        visible: mouse.containsMouse && root.tip !== "" && !tipDelay.running
+        color: "transparent"
+        implicitWidth: tipBox.width
+        implicitHeight: tipBox.height
+
+        Rectangle {
+            id: tipBox
+
+            width: tipText.implicitWidth + 24
+            height: tipText.implicitHeight + 14
+            radius: height / 2
+            color: Theme.island
+            border.color: Theme.islandBorder
+            border.width: 1
+
+            Text {
+                id: tipText
+
+                anchors.centerIn: parent
+                text: root.tip
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+                color: Theme.text
+            }
+        }
+    }
+
     MouseArea {
         id: mouse
 

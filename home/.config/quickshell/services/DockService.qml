@@ -347,7 +347,9 @@ Singleton {
     }
 
     // Offset that moves a hidden dock and its shadow fully off screen.
-    readonly property real retreat: Theme.dockThickness + Theme.dockMargin
+    // Local tweak: PEEK px of the capsule stay visible while hidden.
+    readonly property real peek: 8
+    readonly property real retreat: Theme.dockThickness + Theme.dockMargin - root.peek
 
     readonly property real hiddenX: root.edge === "left"
         ? -root.retreat : (root.edge === "right" ? root.retreat : 0)
