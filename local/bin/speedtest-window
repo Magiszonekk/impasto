@@ -297,19 +297,26 @@ def run_cli():
             tracked["up"].append(self)
 
     lib.HTTPDownloader, lib.HTTPUploader = Down, Up
-    st = {"phase": "ping", "err": None, "done": False, "obj": None, "down": 0.0}
+    st = {"phase": "ping", "err": None, "done": False, "obj": None, "down": 0.0,
+          "finished": 0, "total": 1}
+
+    def on_request(i, n, start=False, end=False):
+        """Callback speedtest-cli: faza kończy się po ostatnim żądaniu albo po 10 s."""
+        st["total"] = n
+        if end:
+            st["finished"] += 1
 
     def job():
         try:
             t = lib.Speedtest()
             st["obj"] = t
             t.get_best_server()
-            st["phase"] = "down"
+            st["phase"], st["finished"] = "down", 0
             st["start"] = time.perf_counter()
-            st["down"] = t.download() / 1e6
-            st["phase"] = "up"
+            st["down"] = t.download(callback=on_request) / 1e6
+            st["phase"], st["finished"] = "up", 0
             st["start"] = time.perf_counter()
-            t.upload()
+            t.upload(callback=on_request)
         except Exception as e:  # noqa: BLE001
             st["err"] = e
         st["done"] = True
@@ -350,7 +357,8 @@ def run_cli():
             if len(window) >= 2 and el - window[0][0] > 0.15:
                 inst = (b - window[0][1]) * 8 / 1e6 / (el - window[0][0])
             shown += (inst - shown) * 0.35
-            bar = min(40, int(el / 10.0 * 40))
+            frac_done = max(el / 10.0, st["finished"] / max(1, st["total"]))
+            bar = min(40, int(frac_done * 40))
             prog = f"{color}{'━' * bar}{X}{D}{'━' * (40 - bar)}{X}"
             draw(f"{BOLD}{name}{X}", shown, color, results + ["  " + prog])
         time.sleep(0.05)
