@@ -2,7 +2,7 @@
 """Okno testu prędkości z żywym prędkościomierzem (jak w omarchy).
 
 Pomiar przez speed.cloudflare.com: ping, pobieranie, wysyłanie. Wskazówka
-rusza się w trakcie testu, na końcu zostają trzy wyniki.
+rusza się w trakcie testu, na końcu zostają łuki Download i Upload obok siebie oraz ping.
 """
 import http.client
 import math
@@ -167,6 +167,40 @@ def draw(title, value, color, lines_below):
     sys.stdout.flush()
 
 
+GAP = 6  # odstęp między łukami na ekranie końcowym
+
+
+def draw_final(down, up, lines_below):
+    """Ekran końcowy: łuki Download i Upload obok siebie, wyniki pod spodem."""
+    cols, lines = os.get_terminal_size() if sys.stdout.isatty() else (80, 24)
+    total = BLOCK_W * 2 + GAP
+    pad = " " * max(0, (cols - total) // 2)
+    top = max(0, (lines - BLOCK_H) // 2)
+    rows = [""] * top
+    head = f"{BOLD}󰓅  Speed test{X}   {D}speed.cloudflare.com{X}"
+    n = len(ANSI.sub("", head))
+    rows += [pad + " " * max(0, (total - n) // 2) + head, ""]
+    mid = BLOCK_W // 2
+    title = [" "] * total
+    for start, word in ((mid - 4, "Download"), (BLOCK_W + GAP + mid - 3, "Upload")):
+        for k, ch in enumerate(word):
+            title[start + k] = ch
+    plain = "".join(title)
+    plain = plain.replace("Download", f"{BOLD}{G}Download{X}").replace("Upload", f"{BOLD}{B}Upload{X}")
+    rows.append(pad + plain)
+    for l1, l2 in zip(gauge(down, G), gauge(up, B)):
+        rows.append(pad + l1 + " " * GAP + l2)
+    v1 = f"{BOLD}{G}{down:7.1f}{X} Mb/s"
+    v2 = f"{BOLD}{B}{up:7.1f}{X} Mb/s"
+    left = " " * (W - 6)
+    rows.append(pad + left + v1 + " " * (BLOCK_W - (W - 6) - len(ANSI.sub("", v1)) + GAP) + left + v2)
+    rows.append("")
+    below = [centred(line.strip(), pad) if line.strip() else "" for line in lines_below]
+    rows += below
+    sys.stdout.write("\033[H" + "".join(r + "\033[K\n" for r in rows) + "\033[J")
+    sys.stdout.flush()
+
+
 def run_phase(name, color, worker, results):
     m = Meter()
     for _ in range(STREAMS):
@@ -220,8 +254,7 @@ def main():
         results.append(f"  Download   {BOLD}{G}{down:.1f} Mb/s{X}")
         up = run_phase("Upload", B, worker_up, results)
         results.append(f"  Upload     {BOLD}{B}{up:.1f} Mb/s{X}")
-        draw(f"{BOLD}Done{X}", down, G,
-             results + ["", f"  {D}Press any key to close{X}"])
+        draw_final(down, up, [r for r in results if "Ping" in r] + ["", f"{D}Press any key to close{X}"])
         os.system("stty -echo -icanon min 1 2>/dev/null")
         sys.stdin.read(1)
     finally:
