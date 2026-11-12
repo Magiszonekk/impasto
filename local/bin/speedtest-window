@@ -2,7 +2,10 @@
 """Okno testu prędkości z prędkościomierzami (jak w omarchy).
 
 Domyślnie mierzy przez speedtest-cli (serwer wybierany automatycznie, wskazówka
-rośnie na żywo z liczników jego wątków). Gdy speedtest-cli
+rośnie na żywo z liczników jego wątków). Wynik to średnia z okna pełnej
+równoległości (po rozbiegu, do startu ostatniego żądania), a nie suma bajtów
+przez cały czas jak w samym speedtest-cli, który zaniża wynik rozbiegiem i
+wygasaniem wątków na końcu. Gdy speedtest-cli
 nie istnieje albo zawiedzie, przechodzi na speed.cloudflare.com z żywą
 wskazówką. Na końcu zostają łuki Download i Upload obok siebie oraz ping.
 
@@ -276,6 +279,30 @@ def load_speedtest():
             return None
 
 
+def plateau(samples, last_start, end_el):
+    """Średnia prędkość (Mb/s) z okna pełnej równoległości: od końca rozbiegu
+    (WARMUP) do startu ostatniego żądania z kolejki speedtest-cli, bo potem
+    zostają same wygasające wątki. samples: lista (czas od startu fazy, bajty).
+    Zwraca None, gdy okno jest za krótkie."""
+    t1 = min(last_start, end_el) if last_start is not None else end_el
+    t0 = WARMUP
+    if t1 - t0 < 1.0 or len(samples) < 2:
+        return None
+
+    def at(t):
+        prev = samples[0]
+        for cur in samples:
+            if cur[0] >= t:
+                if cur[0] == prev[0]:
+                    return cur[1]
+                k = (t - prev[0]) / (cur[0] - prev[0])
+                return prev[1] + (cur[1] - prev[1]) * k
+            prev = cur
+        return samples[-1][1]
+
+    return (at(t1) - at(t0)) * 8 / 1e6 / (t1 - t0)
+
+
 def run_cli():
     """Test przez moduł speedtest-cli z żywą wskazówką: liczniki bajtów bierzemy
     z jego wątków pobierania i wysyłania. Zwraca słownik albo None."""
@@ -298,11 +325,13 @@ def run_cli():
 
     lib.HTTPDownloader, lib.HTTPUploader = Down, Up
     st = {"phase": "ping", "err": None, "done": False, "obj": None, "down": 0.0,
-          "finished": 0, "total": 1}
+          "finished": 0, "total": 1, "last_start": None}
 
     def on_request(i, n, start=False, end=False):
         """Callback speedtest-cli: faza kończy się po ostatnim żądaniu albo po 10 s."""
         st["total"] = n
+        if start and i == n - 1:
+            st["last_start"] = time.perf_counter() - st["start"]
         if end:
             st["finished"] += 1
 
@@ -311,10 +340,10 @@ def run_cli():
             t = lib.Speedtest()
             st["obj"] = t
             t.get_best_server()
-            st["phase"], st["finished"] = "down", 0
+            st["phase"], st["finished"], st["last_start"] = "down", 0, None
             st["start"] = time.perf_counter()
             st["down"] = t.download(callback=on_request) / 1e6
-            st["phase"], st["finished"] = "up", 0
+            st["phase"], st["finished"], st["last_start"] = "up", 0, None
             st["start"] = time.perf_counter()
             t.upload(callback=on_request)
         except Exception as e:  # noqa: BLE001
@@ -331,6 +360,13 @@ def run_cli():
     spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
     t0 = time.perf_counter()
     window, shown, last, results = [], 0.0, "ping", []
+    samples, final = [], {}
+
+    def finish(phase, lib_value):
+        """Wynik fazy: z okna pełnej równoległości, a bez niego z biblioteki."""
+        end_el = samples[-1][0] if samples else 0.0
+        v = plateau(samples, st["last_start"], end_el)
+        final[phase] = v if v is not None else lib_value
     while not st["done"]:
         now = time.perf_counter() - t0
         phase = st["phase"]
@@ -341,8 +377,10 @@ def run_cli():
             results.append(f"  Ping       {BOLD}{obj.results.ping:.0f} ms{X}")
         if phase != last:
             window, shown = [], 0.0
-            if phase == "up":
-                results.append(f"  Download   {BOLD}{G}{st['down']:.1f} Mb/s{X}")
+            if last == "down":
+                finish("down", st["down"])
+                results.append(f"  Download   {BOLD}{G}{final['down']:.1f} Mb/s{X}")
+            samples = []
             last = phase
         if phase == "ping":
             draw(f"{BOLD}Ping{X}", 0, C,
@@ -351,6 +389,7 @@ def run_cli():
             color, name = (G, "Download") if phase == "down" else (B, "Upload")
             el = time.perf_counter() - st["start"]
             b = total(phase)
+            samples.append((el, b))
             window.append((el, b))
             window = [w for w in window if el - w[0] <= 1.0]
             inst = 0.0
@@ -366,7 +405,8 @@ def run_cli():
     if st["err"] is not None or obj is None or not obj.results.upload:
         return None
     r = obj.results
-    return {"down": r.download / 1e6, "up": r.upload / 1e6, "ping": r.ping,
+    finish("up", r.upload / 1e6)
+    return {"down": final.get("down", st["down"]), "up": final["up"], "ping": r.ping,
             "jitter": None, "source": SOURCE}
 
 
