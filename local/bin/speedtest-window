@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Okno testu prędkości z prędkościomierzami (jak w omarchy).
 
-Domyślnie mierzy przez speedtest-cli (serwer wybierany automatycznie, bez
-żywej wskazówki: narzędzie podaje wynik dopiero na końcu). Gdy speedtest-cli
+Domyślnie mierzy przez speedtest-cli (serwer wybierany automatycznie, wskazówka
+rośnie na żywo z liczników jego wątków). Gdy speedtest-cli
 nie istnieje albo zawiedzie, przechodzi na speed.cloudflare.com z żywą
 wskazówką. Na końcu zostają łuki Download i Upload obok siebie oraz ping.
 
@@ -10,14 +10,11 @@ wskazówką. Na końcu zostają łuki Download i Upload obok siebie oraz ping.
   speedtest-window --cloudflare tylko Cloudflare
 """
 import http.client
-import json
 import math
 import os
 import re
-import shutil
 import ssl
 import statistics
-import subprocess
 import sys
 import threading
 import time
@@ -32,6 +29,7 @@ R, G, B, C, D, BOLD, X = ("\033[31m", "\033[32m", "\033[34m", "\033[36m",
                           "\033[2m", "\033[1m", "\033[0m")
 
 CTX = ssl.create_default_context()
+SOURCE = HOST  # opis serwera pokazywany w nagłówku, aktualizowany w trakcie
 
 
 class Refused(Exception):
@@ -166,10 +164,10 @@ BLOCK_H = 3 + (H + 1) + 2 + BELOW  # stała wysokość, żeby nic nie skakało
 ANSI = re.compile(r"\033\[[0-9;]*m")
 
 
-def centred(text, pad):
-    """Wyśrodkowuje wiersz względem łuku (długość liczona bez kodów ANSI)."""
+def centred(text, pad, width=None):
+    """Wyśrodkowuje wiersz względem łuku albo podanej szerokości (bez kodów ANSI)."""
     n = len(ANSI.sub("", text))
-    return pad + " " * max(0, (BLOCK_W - n) // 2) + text
+    return pad + " " * max(0, ((width or BLOCK_W) - n) // 2) + text
 
 
 def draw(title, value, color, lines_below):
@@ -177,7 +175,7 @@ def draw(title, value, color, lines_below):
     pad = " " * max(0, (cols - BLOCK_W) // 2)
     top = max(0, (lines - BLOCK_H) // 2)
     rows = [""] * top
-    rows += [centred(f"{BOLD}󰓅  Speed test{X}   {D}speed.cloudflare.com{X}", pad),
+    rows += [centred(f"{BOLD}󰓅  Speed test{X}   {D}{SOURCE}{X}", pad),
              "", centred(title, pad)]
     rows += [pad + line for line in gauge(value, color)]
     rows.append(f"{pad}{' ' * (W - 6)}{BOLD}{color}{value:7.1f}{X} Mb/s")
@@ -192,14 +190,14 @@ def draw(title, value, color, lines_below):
 GAP = 6  # odstęp między łukami na ekranie końcowym
 
 
-def draw_final(down, up, lines_below, source=HOST):
+def draw_final(down, up, lines_below, source=None):
     """Ekran końcowy: łuki Download i Upload obok siebie, wyniki pod spodem."""
     cols, lines = os.get_terminal_size() if sys.stdout.isatty() else (80, 24)
     total = BLOCK_W * 2 + GAP
     pad = " " * max(0, (cols - total) // 2)
     top = max(0, (lines - BLOCK_H) // 2)
     rows = [""] * top
-    head = f"{BOLD}󰓅  Speed test{X}   {D}{source}{X}"
+    head = f"{BOLD}󰓅  Speed test{X}   {D}{source or SOURCE}{X}"
     n = len(ANSI.sub("", head))
     rows += [pad + " " * max(0, (total - n) // 2) + head, ""]
     mid = BLOCK_W // 2
@@ -217,7 +215,7 @@ def draw_final(down, up, lines_below, source=HOST):
     left = " " * (W - 6)
     rows.append(pad + left + v1 + " " * (BLOCK_W - (W - 6) - len(ANSI.sub("", v1)) + GAP) + left + v2)
     rows.append("")
-    below = [centred(line.strip(), pad) if line.strip() else "" for line in lines_below]
+    below = [centred(line.strip(), pad, total) if line.strip() else "" for line in lines_below]
     rows += below
     sys.stdout.write("\033[H" + "".join(r + "\033[K\n" for r in rows) + "\033[J")
     sys.stdout.flush()
@@ -261,42 +259,113 @@ def run_phase(name, color, worker, results):
     return b * 8 / 1e6 / end
 
 
-def run_cli():
-    """Test przez speedtest-cli. Zwraca słownik albo None, gdy się nie udał."""
-    exe = shutil.which("speedtest-cli")
-    if not exe:
-        return None
-    proc = subprocess.Popen([exe, "--json"], stdout=subprocess.PIPE,
-                            stderr=subprocess.DEVNULL, text=True)
-    t0 = time.perf_counter()
-    spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+def load_speedtest():
+    """Importuje moduł speedtest-cli (paczka systemowa, może być poza sys.path)."""
     try:
-        while proc.poll() is None:
-            now = time.perf_counter() - t0
-            pos = int(now * 12) % 40
-            bar = D + "━" * 40 + X
-            bar = D + "━" * pos + X + C + "━━" + X + D + "━" * max(0, 38 - pos) + X
-            draw(f"{BOLD}Pomiar{X}", 0, C,
-                 [f"  {spin[int(now * 10) % len(spin)]}  speedtest-cli: serwer, pobieranie, wysyłanie",
-                  f"  {D}{now:4.0f} s (zwykle 20 do 40 s){X}", "  " + bar])
-            time.sleep(0.08)
-        out = proc.stdout.read()
-        if proc.returncode != 0:
+        import speedtest
+        return speedtest
+    except ImportError:
+        import glob
+        for d in sorted(glob.glob("/usr/lib/python3*/site-packages")):
+            if d not in sys.path:
+                sys.path.append(d)
+        try:
+            import speedtest
+            return speedtest
+        except ImportError:
             return None
-        d = json.loads(out)
-        srv = d.get("server", {})
-        return {"down": d["download"] / 1e6, "up": d["upload"] / 1e6,
-                "ping": d["ping"], "jitter": None,
-                "source": f"speedtest-cli · {srv.get('name', '?')} · {srv.get('sponsor', '?')}"}
-    except (ValueError, KeyError, OSError):
+
+
+def run_cli():
+    """Test przez moduł speedtest-cli z żywą wskazówką: liczniki bajtów bierzemy
+    z jego wątków pobierania i wysyłania. Zwraca słownik albo None."""
+    global SOURCE
+    lib = load_speedtest()
+    if lib is None:
         return None
-    finally:
-        if proc.poll() is None:
-            proc.kill()
+    SOURCE = "speedtest-cli · wybieranie serwera..."
+    tracked = {"down": [], "up": []}
+
+    class Down(lib.HTTPDownloader):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            tracked["down"].append(self)
+
+    class Up(lib.HTTPUploader):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            tracked["up"].append(self)
+
+    lib.HTTPDownloader, lib.HTTPUploader = Down, Up
+    st = {"phase": "ping", "err": None, "done": False, "obj": None, "down": 0.0}
+
+    def job():
+        try:
+            t = lib.Speedtest()
+            st["obj"] = t
+            t.get_best_server()
+            st["phase"] = "down"
+            st["start"] = time.perf_counter()
+            st["down"] = t.download() / 1e6
+            st["phase"] = "up"
+            st["start"] = time.perf_counter()
+            t.upload()
+        except Exception as e:  # noqa: BLE001
+            st["err"] = e
+        st["done"] = True
+
+    threading.Thread(target=job, daemon=True).start()
+
+    def total(phase):
+        if phase == "down":
+            return sum(sum(t.result) for t in list(tracked["down"]))
+        return sum(sum(t.request.data.total) for t in list(tracked["up"]))
+
+    spin = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    t0 = time.perf_counter()
+    window, shown, last, results = [], 0.0, "ping", []
+    while not st["done"]:
+        now = time.perf_counter() - t0
+        phase = st["phase"]
+        obj = st["obj"]
+        if obj is not None and obj.results.server and SOURCE.endswith("..."):
+            srv = obj.results.server
+            SOURCE = f"speedtest-cli · {srv.get('sponsor', '?')} ({srv.get('name', '?')})"
+            results.append(f"  Ping       {BOLD}{obj.results.ping:.0f} ms{X}")
+        if phase != last:
+            window, shown = [], 0.0
+            if phase == "up":
+                results.append(f"  Download   {BOLD}{G}{st['down']:.1f} Mb/s{X}")
+            last = phase
+        if phase == "ping":
+            draw(f"{BOLD}Ping{X}", 0, C,
+                 [f"  {spin[int(now * 10) % len(spin)]}  szukanie najlepszego serwera"])
+        else:
+            color, name = (G, "Download") if phase == "down" else (B, "Upload")
+            el = time.perf_counter() - st["start"]
+            b = total(phase)
+            window.append((el, b))
+            window = [w for w in window if el - w[0] <= 1.0]
+            inst = 0.0
+            if len(window) >= 2 and el - window[0][0] > 0.15:
+                inst = (b - window[0][1]) * 8 / 1e6 / (el - window[0][0])
+            shown += (inst - shown) * 0.35
+            bar = min(40, int(el / 10.0 * 40))
+            prog = f"{color}{'━' * bar}{X}{D}{'━' * (40 - bar)}{X}"
+            draw(f"{BOLD}{name}{X}", shown, color, results + ["  " + prog])
+        time.sleep(0.05)
+    obj = st["obj"]
+    if st["err"] is not None or obj is None or not obj.results.upload:
+        return None
+    r = obj.results
+    return {"down": r.download / 1e6, "up": r.upload / 1e6, "ping": r.ping,
+            "jitter": None, "source": SOURCE}
 
 
 def run_cloudflare():
     """Test przez Cloudflare. Rzuca Refused (429) albo OSError (brak sieci)."""
+    global SOURCE
+    SOURCE = HOST
     results = []
     draw(f"{BOLD}Ping{X}", 0, C, ["  Connecting..."])
     p, jitter = ping()
