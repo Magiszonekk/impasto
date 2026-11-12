@@ -26,11 +26,16 @@ R, G, B, C, D, BOLD, X = ("\033[31m", "\033[32m", "\033[34m", "\033[36m",
 CTX = ssl.create_default_context()
 
 
+class Refused(Exception):
+    pass
+
+
 class Meter:
     def __init__(self):
         self.bytes = 0
         self.lock = threading.Lock()
         self.stop = False
+        self.error = None  # (kod HTTP, Retry-After) gdy serwer odmawia
 
     def add(self, n):
         with self.lock:
@@ -43,6 +48,10 @@ def worker_down(m):
             c = http.client.HTTPSConnection(HOST, context=CTX, timeout=10)
             c.request("GET", "/__down?bytes=50000000")
             r = c.getresponse()
+            if r.status != 200:
+                m.error = (r.status, r.getheader("Retry-After"))
+                m.stop = True
+                return
             while not m.stop:
                 chunk = r.read(65536)
                 if not chunk:
@@ -68,7 +77,12 @@ def worker_up(m):
                 sent += len(block)
                 m.add(len(block))
             if not m.stop:
-                c.getresponse().read()
+                r = c.getresponse()
+                r.read()
+                if r.status != 200:
+                    m.error = (r.status, r.getheader("Retry-After"))
+                    m.stop = True
+                    return
             c.close()
         except Exception:
             time.sleep(0.2)
@@ -215,6 +229,8 @@ def run_phase(name, color, worker, results):
             break
         with m.lock:
             b = m.bytes
+        if m.error:
+            raise Refused(m.error)
         window.append((now, b))
         window = [w for w in window if now - w[0] <= 1.0]
         if now >= WARMUP and warm is None:
@@ -257,6 +273,14 @@ def main():
         draw_final(down, up, [r for r in results if "Ping" in r] + ["", f"{D}Press any key to close{X}"])
         os.system("stty -echo -icanon min 1 2>/dev/null")
         sys.stdin.read(1)
+    except Refused as e:
+        code, retry = e.args[0]
+        sys.stdout.write("\033[2J\033[H")
+        print(f"\n  {R}Serwer odmówił pomiaru (HTTP {code}){X}")
+        if code == 429:
+            when = f" Spróbuj za ok. {int(retry) // 60} min." if (retry or "").isdigit() else ""
+            print(f"  {D}Limit zapytań Cloudflare dla Twojego IP.{when}{X}")
+        input("\n  Press Enter to close... ")
     finally:
         sys.stdout.write("\033[?25h\033[?1049l")
         os.system("stty sane 2>/dev/null")
