@@ -225,3 +225,13 @@ hl.window_rule({
     center = true,
     size   = {1100, 560},
 })
+
+-- · lokalny dodatek: okno wyboru VPN z przycisku na pasku
+hl.window_rule({
+    name  = "vpn-window",
+    match = { class = "^(impasto-vpn)$" },
+
+    float  = true,
+    center = true,
+    size   = {460, 260},
+})

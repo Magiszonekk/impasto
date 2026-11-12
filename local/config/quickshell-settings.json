@@ -3,14 +3,16 @@
     "barEverywhere": true,
     "barHeight": 32,
     "barHidden": false,
-    "barLeft": null,
+    "barLeft": [
+        "workspaces"
+    ],
     "barMargin": 16,
     "barRight": [
         "tray",
         "sudo",
         "speedtest",
+        "vpn",
         "notifications",
-        "network",
         "bluetooth",
         "volume",
         "battery"
@@ -36,8 +38,24 @@
     "centreColumns": 0,
     "centreRows": 0,
     "centreToggles": null,
-    "centreTop": null,
-    "chipFigure": "on",
+    "centreTop": {
+        "left": [
+            "lock",
+            "suspend",
+            "logout",
+            "reboot",
+            "shutdown"
+        ],
+        "right": [
+            "stats",
+            "settings",
+            "pet",
+            "games",
+            "notes",
+            "board"
+        ]
+    },
+    "chipFigure": "hover",
     "chipShape": "icon",
     "clipboardHistory": true,
     "clipboardImages": true,
@@ -47,6 +65,7 @@
     "clockShowsDate": false,
     "clockShowsSeconds": false,
     "compositor": {
+        "decoration:inactive_opacity": "1.00"
     },
     "cursorColor": "palette",
     "cursorSize": 24,
@@ -55,10 +74,8 @@
     "desktopHidden": false,
     "desktopOpacity": 100,
     "desktopTheme": "modern",
-    "desktopWidgets": [
-    ],
-    "displays": {
-    },
+    "desktopWidgets": [],
+    "displays": {},
     "doNotDisturb": true,
     "dockAlignment": "center",
     "dockAutohide": true,
@@ -70,38 +87,34 @@
     "dockLauncher": true,
     "dockMagnify": true,
     "dockOpacity": 100,
-    "dockPinned": [
-    ],
+    "dockPinned": [],
     "dockRunning": true,
     "dockShadow": false,
     "emojiTone": 0,
     "fontFamily": "Inter, Cantarell, SF Pro Text, sans-serif",
     "fontMono": "JetBrainsMono Nerd Font Mono, monospace",
     "gameMode": false,
-    "githubUser": "",
+    "githubUser": "Magiszonekk",
     "greeting": "random",
-    "idleLock": 0,
+    "idleLock": 20,
     "idleScreen": 0,
     "idleSuspend": 0,
     "islandActivities": null,
     "islandActivitiesSeen": null,
     "islandAttached": false,
     "islandSummary": true,
-    "keyboard": {
-    },
-    "keys": {
-    },
+    "keyboard": {},
+    "keys": {},
     "language": "en",
     "launcherFits": false,
     "launcherOrder": "recent",
-    "launcherPrefixes": {
-    },
+    "launcherPrefixes": {},
     "launcherResults": 9,
     "lidPolicy": "off",
     "lockBlur": 32,
-    "lockClock": "stacked",
+    "lockClock": "inline",
     "lockMusic": "lyrics",
-    "lockMusicGround": "cover",
+    "lockMusicGround": "desktop",
     "lyrics": true,
     "markets": "BTC, ETH, EUR/USD",
     "motionCurve": "OutCubic",
@@ -116,7 +129,7 @@
     "shakeToFind": true,
     "spectrumOnEmpty": false,
     "surfaceStyle": "classic",
-    "terminalGround": "glass",
+    "terminalGround": "liquid",
     "userAvatar": "",
     "userName": "",
     "wallpaperTransition": "wipe",

@@ -85,7 +85,7 @@ Singleton {
     // Capture is what the capture key does: the photo is taken at once, so
     // whatever the island has open is in it.
     readonly property var buttonIds: ["launcher", "overview", "controls", "capture",
-        "appearance", "notes", "board", "games", "keys", "packages", "settings", "session", "sudo", "speedtest"]
+        "appearance", "notes", "board", "games", "keys", "packages", "settings", "session", "sudo", "speedtest", "vpn"]
 
     readonly property var buttons: {
         const out = {}
@@ -106,6 +106,13 @@ Singleton {
                 out[id] = { name: "Speed test", glyph: "󰓅",
                             action: () => Quickshell.execDetached(["kitty", "--class", "impasto-speedtest",
                                 "--title", "speedtest", Quickshell.env("HOME") + "/.local/bin/speedtest-window"]) }
+                continue
+            }
+            // Lokalny dodatek: wybór VPN z profili NetworkManagera (~/.local/bin/vpn-window).
+            if (id === "vpn") {
+                out[id] = { name: "VPN", glyph: "󰖂",
+                            action: () => Quickshell.execDetached(["kitty", "--class", "impasto-vpn",
+                                "--title", "vpn", Quickshell.env("HOME") + "/.local/bin/vpn-window"]) }
                 continue
             }
             if (id === "capture") {

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Okno wyboru VPN: lista profili NetworkManagera (wireguard/vpn), klawisz 1-9 przełącza.
+# Aktywny profil jest oznaczony ●, wybranie go rozłącza.
+list() {
+    names=(); types=(); active=()
+    local act; act=$(nmcli -t -f NAME connection show --active)
+    while IFS=: read -r n t; do
+        [[ $t == wireguard || $t == vpn ]] || continue
+        names+=("$n"); types+=("$t")
+        if grep -qxF -- "$n" <<<"$act"; then active+=(1); else active+=(0); fi
+    done < <(nmcli -t -f NAME,TYPE connection show | sed 's/\\:/;/g')
+}
+while true; do
+    list
+    clear
+    printf '\n  \033[1m󰖂  VPN\033[0m\n\n'
+    if ((${#names[@]} == 0)); then
+        printf '  Brak profili VPN.\n\n  Dodaj plik .conf:\n  \033[2mnmcli connection import type wireguard file plik.conf\033[0m\n'
+        read -rsn1 -p $'\n  Dowolny klawisz zamyka '; exit 0
+    fi
+    for i in "${!names[@]}"; do
+        if ((active[i])); then printf '  \033[32m%d  ● %s\033[0m\n' $((i+1)) "${names[i]}"
+        else printf '  %d  ○ %s\n' $((i+1)) "${names[i]}"; fi
+    done
+    printf '\n  \033[2m1-9 przełącza · q zamyka\033[0m\n'
+    read -rsn1 k
+    [[ $k == q || $k == $'\e' || -z $k ]] && exit 0
+    [[ $k =~ ^[1-9]$ ]] && ((k <= ${#names[@]})) || continue
+    i=$((k-1))
+    # jeden aktywny naraz: najpierw wyłącz pozostałe
+    for j in "${!names[@]}"; do ((active[j] && j != i)) && nmcli connection down id "${names[j]}" >/dev/null 2>&1; done
+    printf '\n  ...\n'
+    if ((active[i])); then out=$(nmcli connection down id "${names[i]}" 2>&1)
+    else out=$(nmcli connection up id "${names[i]}" 2>&1); fi
+    rc=$?
+    ((rc)) && { printf '\n  \033[31m%s\033[0m\n' "$out"; read -rsn1 -p '  Dowolny klawisz '; }
+done
