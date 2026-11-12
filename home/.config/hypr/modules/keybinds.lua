@@ -331,6 +331,12 @@ bind(mainMod .. " + S",       hl.dsp.workspace.toggle_special("scratchpad"),    
 bind(mainMod .. " + ALT + S", hl.dsp.window.move({ workspace = "special:scratchpad" }), { description = "Workspaces · Move the window to the scratchpad" })
 
 
+-- ── APPS (magiszonek) ───────────────────────────────────────────────────────
+
+bind(mainMod .. " + M", hl.dsp.exec_cmd("spotify"),  { description = "Applications · Open Spotify" })
+bind(mainMod .. " + D", hl.dsp.exec_cmd("vesktop"),  { description = "Applications · Open Discord (Vesktop)" })
+
+
 -- ── MEDIA KEYS ──────────────────────────────────────────────────────────────
 
 -- · volume and brightness; brightness goes through the shell, which knows
